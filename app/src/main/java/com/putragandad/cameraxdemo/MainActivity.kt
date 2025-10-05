@@ -7,6 +7,7 @@ import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.MediaStore
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.ImageCapture
@@ -29,11 +30,13 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.PermissionChecker
+import java.io.File
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -74,6 +77,8 @@ class MainActivity : AppCompatActivity() {
     private fun takePhoto() {}
 
     private fun captureVideo() {
+        val timestamp = System.currentTimeMillis()
+
         val videoCapture = this.videoCapture ?: return
 
         viewBinding.videoCaptureButton.isEnabled = false
@@ -89,56 +94,126 @@ class MainActivity : AppCompatActivity() {
         // create and start a new recording session
         val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US)
             .format(System.currentTimeMillis())
+
+        // ContentValues that later handled on backward compatibility manner
         val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/CameraX-Video")
-            }
+            put(MediaStore.Video.Media.DATE_ADDED, timestamp)
         }
 
         val mediaStoreOutputOptions = MediaStoreOutputOptions
             .Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
             .setContentValues(contentValues)
             .build()
-        recording = videoCapture.output
-            .prepareRecording(this, mediaStoreOutputOptions)
-            .apply {
-                if (PermissionChecker.checkSelfPermission(this@MainActivity,
-                        Manifest.permission.RECORD_AUDIO) ==
-                    PermissionChecker.PERMISSION_GRANTED)
-                {
-                    withAudioEnabled()
-                }
-            }
-            .start(ContextCompat.getMainExecutor(this)) { recordEvent ->
-                when(recordEvent) {
-                    is VideoRecordEvent.Start -> {
-                        viewBinding.videoCaptureButton.apply {
-                            text = getString(R.string.stop_capture)
-                            isEnabled = true
-                        }
-                    }
-                    is VideoRecordEvent.Finalize -> {
-                        if (!recordEvent.hasError()) {
-                            val msg = "Video capture succeeded: " +
-                                    "${recordEvent.outputResults.outputUri}"
-                            Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT)
-                                .show()
-                            Log.d(TAG, msg)
-                        } else {
-                            recording?.close()
-                            recording = null
-                            Log.e(TAG, "Video capture ends with error: " +
-                                    "${recordEvent.error}")
-                        }
-                        viewBinding.videoCaptureButton.apply {
-                            text = getString(R.string.start_capture)
-                            isEnabled = true
-                        }
+
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // content values for MediaStore Android >= 10
+            contentValues.put(MediaStore.Video.Media.DATE_TAKEN, timestamp)
+            contentValues.put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/CameraX-Video")
+
+            recording = videoCapture.output
+                .prepareRecording(this, mediaStoreOutputOptions)
+                .apply {
+                    if (PermissionChecker.checkSelfPermission(this@MainActivity,
+                            Manifest.permission.RECORD_AUDIO) ==
+                        PermissionChecker.PERMISSION_GRANTED)
+                    {
+                        withAudioEnabled()
                     }
                 }
+                .start(ContextCompat.getMainExecutor(this)) { recordEvent ->
+                    when(recordEvent) {
+                        is VideoRecordEvent.Start -> {
+                            viewBinding.videoCaptureButton.apply {
+                                text = getString(R.string.stop_capture)
+                                isEnabled = true
+                            }
+                        }
+                        is VideoRecordEvent.Finalize -> {
+                            if (!recordEvent.hasError()) {
+                                val msg = "Video capture succeeded: " +
+                                        "${recordEvent.outputResults.outputUri}"
+
+                                // notify mediastore so this video can be indexed on google photo/gallery
+                                // for android >= 10
+                                contentValues.put(MediaStore.Video.Media.IS_PENDING, false)
+                                this.contentResolver.update(recordEvent.outputResults.outputUri, contentValues, null, null)
+
+                                Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT)
+                                    .show()
+                                Log.d(TAG, msg)
+                            } else {
+                                recording?.close()
+                                recording = null
+                                Log.e(TAG, "Video capture ends with error: " +
+                                        "${recordEvent.error}")
+                            }
+                            viewBinding.videoCaptureButton.apply {
+                                text = getString(R.string.start_capture)
+                                isEnabled = true
+                            }
+                        }
+                    }
+                }
+        } else {
+            // for Android < 10, we use FileoutputOptions as fallback for saving video
+            val videoFileFolder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES).toString() + "/CameraX_Video")
+            if (!videoFileFolder.exists()) {
+                videoFileFolder.mkdirs()
             }
+            val mImageName = "$timestamp.mp4"
+            val videoFile = File(videoFileFolder, mImageName)
+
+            val fileOutputOptions = FileOutputOptions.Builder(videoFile).build()
+
+            recording = videoCapture.output
+                .prepareRecording(this, fileOutputOptions) // use the overload constructor for API 21 found in Recorder.java of Camerax video
+                .apply {
+                    if (PermissionChecker.checkSelfPermission(this@MainActivity,
+                            Manifest.permission.RECORD_AUDIO) ==
+                        PermissionChecker.PERMISSION_GRANTED)
+                    {
+                        withAudioEnabled()
+                    }
+                }
+                .start(ContextCompat.getMainExecutor(this)) { recordEvent ->
+                    when(recordEvent) {
+                        is VideoRecordEvent.Start -> {
+                            viewBinding.videoCaptureButton.apply {
+                                text = getString(R.string.stop_capture)
+                                isEnabled = true
+                            }
+                        }
+                        is VideoRecordEvent.Finalize -> {
+                            if (!recordEvent.hasError()) {
+                                val msg = "Video capture succeeded: " +
+                                        "${recordEvent.outputResults.outputUri}"
+
+                                // notify mediastore so this video can be indexed on google photo/gallery
+                                // for android < 10
+                                contentValues.put(MediaStore.Video.Media.DATA, videoFile.absolutePath)
+                                this.contentResolver.insert(
+                                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                                    contentValues
+                                )
+
+                                Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT)
+                                    .show()
+                                Log.d(TAG, msg)
+                            } else {
+                                recording?.close()
+                                recording = null
+                                Log.e(TAG, "Video capture ends with error: " +
+                                        "${recordEvent.error}")
+                            }
+                            viewBinding.videoCaptureButton.apply {
+                                text = getString(R.string.start_capture)
+                                isEnabled = true
+                            }
+                        }
+                    }
+                }
+        }
     }
 
     private fun startCamera() {
