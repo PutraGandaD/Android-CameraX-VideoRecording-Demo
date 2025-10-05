@@ -29,11 +29,13 @@ import android.view.MotionEvent
 import android.view.View
 import androidx.activity.enableEdgeToEdge
 import androidx.camera.core.CameraControl
+import androidx.camera.core.CameraInfo
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.FocusMeteringAction.FLAG_AF
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.TorchState
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.MediaStoreOutputOptions
@@ -61,6 +63,9 @@ class MainActivity : AppCompatActivity() {
 
     private var cameraControl: CameraControl? = null
 
+    private var cameraInfo: CameraInfo? = null
+    private var lensFacing: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA // default back camerax
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,8 +81,31 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Set up the listeners for take photo and video capture buttons
-        viewBinding.imageCaptureButton.setOnClickListener { takePhoto() }
+//        viewBinding.imageCaptureButton.setOnClickListener { takePhoto() }
         viewBinding.videoCaptureButton.setOnClickListener { captureVideo() }
+
+        viewBinding.flashButton.setOnClickListener {
+            cameraInfo?.let { cameraInfo ->
+                if(cameraInfo.hasFlashUnit()) {
+                    val isTorchOn = cameraInfo.torchState.value == TorchState.ON
+
+                    cameraControl?.enableTorch(!isTorchOn)
+                }
+            }
+        }
+
+        viewBinding.switchCamera.setOnClickListener {
+            when(lensFacing) {
+                CameraSelector.DEFAULT_BACK_CAMERA -> {
+                    lensFacing = CameraSelector.DEFAULT_FRONT_CAMERA
+                    startCamera()
+                }
+                CameraSelector.DEFAULT_FRONT_CAMERA -> {
+                    lensFacing = CameraSelector.DEFAULT_BACK_CAMERA
+                    startCamera()
+                }
+            }
+        }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
     }
@@ -133,9 +161,10 @@ class MainActivity : AppCompatActivity() {
                     when(recordEvent) {
                         is VideoRecordEvent.Start -> {
                             viewBinding.videoCaptureButton.apply {
-                                text = getString(R.string.stop_capture)
                                 isEnabled = true
-                            }
+                            }.setImageResource(R.drawable.ic_outline_stop_circle_24)
+
+                            viewBinding.switchCamera.visibility = View.GONE
                         }
                         is VideoRecordEvent.Finalize -> {
                             if (!recordEvent.hasError()) {
@@ -157,9 +186,10 @@ class MainActivity : AppCompatActivity() {
                                         "${recordEvent.error}")
                             }
                             viewBinding.videoCaptureButton.apply {
-                                text = getString(R.string.start_capture)
                                 isEnabled = true
-                            }
+                            }.setImageResource(R.drawable.ic_baseline_videocam_24)
+
+                            viewBinding.switchCamera.visibility = View.VISIBLE
                         }
                     }
                 }
@@ -188,9 +218,10 @@ class MainActivity : AppCompatActivity() {
                     when(recordEvent) {
                         is VideoRecordEvent.Start -> {
                             viewBinding.videoCaptureButton.apply {
-                                text = getString(R.string.stop_capture)
                                 isEnabled = true
-                            }
+                            }.setImageResource(R.drawable.ic_outline_stop_circle_24)
+
+                            viewBinding.switchCamera.visibility = View.GONE
                         }
                         is VideoRecordEvent.Finalize -> {
                             if (!recordEvent.hasError()) {
@@ -215,9 +246,10 @@ class MainActivity : AppCompatActivity() {
                                         "${recordEvent.error}")
                             }
                             viewBinding.videoCaptureButton.apply {
-                                text = getString(R.string.start_capture)
                                 isEnabled = true
-                            }
+                            }.setImageResource(R.drawable.ic_baseline_videocam_24)
+
+                            viewBinding.switchCamera.visibility = View.VISIBLE
                         }
                     }
                 }
@@ -243,18 +275,32 @@ class MainActivity : AppCompatActivity() {
                 .build()
             videoCapture = VideoCapture.withOutput(recorder)
 
-            // Select back camera as a default
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
             try {
                 // Unbind use cases before rebinding
                 cameraProvider.unbindAll()
 
                 // Bind use cases to camera
                 val camera = cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, videoCapture)
+                    this, lensFacing, preview, videoCapture)
 
                 cameraControl = camera.cameraControl
+                cameraInfo = camera.cameraInfo
+
+                cameraInfo?.torchState?.observe(this) { state ->
+                    if (state == TorchState.ON) {
+                        viewBinding.flashButton.setImageResource(R.drawable.flash_on_24px)
+                    } else {
+                        viewBinding.flashButton.setImageResource(R.drawable.flash_off_24px)
+                    }
+                }
+
+                cameraInfo?.let {
+                    if(it.hasFlashUnit()) {
+                        viewBinding.flashButton.visibility = View.VISIBLE
+                    } else {
+                        viewBinding.flashButton.visibility = View.GONE
+                    }
+                }
 
                 tapToFocus()
             } catch(exc: Exception) {
