@@ -25,7 +25,12 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.core.Preview
 import androidx.camera.core.CameraSelector
 import android.util.Log
+import android.view.MotionEvent
+import android.view.View
 import androidx.activity.enableEdgeToEdge
+import androidx.camera.core.CameraControl
+import androidx.camera.core.FocusMeteringAction
+import androidx.camera.core.FocusMeteringAction.FLAG_AF
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
@@ -40,6 +45,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 typealias LumaListener = (luma: Double) -> Unit
 
@@ -52,6 +58,8 @@ class MainActivity : AppCompatActivity() {
     private var recording: Recording? = null
 
     private lateinit var cameraExecutor: ExecutorService
+
+    private var cameraControl: CameraControl? = null
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -231,7 +239,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
             val recorder = Recorder.Builder()
-                .setQualitySelector(QualitySelector.from(Quality.HIGHEST))
+                .setQualitySelector(QualitySelector.from(Quality.SD))
                 .build()
             videoCapture = VideoCapture.withOutput(recorder)
 
@@ -243,14 +251,74 @@ class MainActivity : AppCompatActivity() {
                 cameraProvider.unbindAll()
 
                 // Bind use cases to camera
-                cameraProvider.bindToLifecycle(
+                val camera = cameraProvider.bindToLifecycle(
                     this, cameraSelector, preview, videoCapture)
 
+                cameraControl = camera.cameraControl
+
+                tapToFocus()
             } catch(exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
 
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun tapToFocus() {
+        viewBinding.viewFinder.setOnTouchListener { _, motionEvent ->
+            when (motionEvent.action) {
+                MotionEvent.ACTION_DOWN -> true
+                MotionEvent.ACTION_UP -> {
+                    // Get the MeteringPointFactory from PreviewView
+                    val factory = viewBinding.viewFinder.meteringPointFactory
+
+                    // Create a MeteringPoint from the tap coordinates
+                    val point = factory.createPoint(motionEvent.x, motionEvent.y)
+
+                    // Create a FocusMeteringAction
+                    val action = FocusMeteringAction.Builder(point)
+                        .addPoint(point, FLAG_AF)
+                        .addPoint(point, FocusMeteringAction.FLAG_AE)
+                        .addPoint(point, FocusMeteringAction.FLAG_AWB)
+                        .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                        .build()
+
+                    // Trigger the focus and metering
+                    cameraControl?.startFocusAndMetering(action)
+
+                    // Show focus indicator
+                    showFocusIndicator(motionEvent.x, motionEvent.y)
+
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun showFocusIndicator(x: Float, y: Float) {
+        val focusIndicator = viewBinding.focusIndicator
+
+        // Position the indicator
+        focusIndicator.x = x - focusIndicator.width / 2
+        focusIndicator.y = y - focusIndicator.height / 2
+
+        // Make it visible
+        focusIndicator.visibility = View.VISIBLE
+
+        // Animate the indicator (scale and fade out)
+        focusIndicator.animate()
+            .scaleX(1.5f)
+            .scaleY(1.5f)
+            .alpha(0f)
+            .setDuration(500)
+            .withEndAction {
+                focusIndicator.visibility = View.GONE
+                focusIndicator.scaleX = 1f
+                focusIndicator.scaleY = 1f
+                focusIndicator.alpha = 1f
+            }
+            .start()
     }
 
     private fun requestPermissions() {

@@ -42,4 +42,13 @@
         android:orientation="vertical"
         app:layout_constraintGuide_percent=".50" />
 
+    <View
+        android:id="@+id/focus_indicator"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:background="@drawable/focus_circle"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"/>
+
 </androidx.constraintlayout.widget.ConstraintLayout>
