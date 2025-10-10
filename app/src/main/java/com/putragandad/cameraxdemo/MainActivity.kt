@@ -422,7 +422,12 @@ class MainActivity : AppCompatActivity() {
             .addListener(transformerListener)
             .setEncoderFactory(
                 DefaultEncoderFactory.Builder(this.getApplicationContext())
-                    .setRequestedVideoEncoderSettings(videoEncoderSettings)
+//                    .setRequestedVideoEncoderSettings(videoEncoderSettings)
+                    .setRequestedVideoEncoderSettings(
+                        VideoEncoderSettings.Builder()
+                            .setBitrate(2_500_000) //2.5Mbps bitrate
+                            .build()
+                    )
                     .build()
             )
             .setMuxerFactory(InAppMp4Muxer.Factory())
@@ -441,7 +446,7 @@ class MainActivity : AppCompatActivity() {
             EditedMediaItemSequence.Builder(editedMediaItemBuilder.build())
         val compositionBuilder =
             Composition.Builder(editedMediaItemSequenceBuilder.build())
-                .setHdrMode(HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC)
+//                .setHdrMode(HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC)
         return compositionBuilder.build()
     }
 
