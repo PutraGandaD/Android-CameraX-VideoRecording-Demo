@@ -15,4 +15,5 @@ and found the additional parameter for .prepareRecording using FileOutputOptions
 - [x] Record video with audio
 - [x] Tap to Focus
 - [x] Switch back/front camera
-- [x] Turn on/off camera flash while recording  
+- [x] Turn on/off camera flash while recording
+- [x] Video size compressing using Androidx Media3 Transformer (in this app it's set to 480p, but you can change it to 720p or 1080p or 4k) 
