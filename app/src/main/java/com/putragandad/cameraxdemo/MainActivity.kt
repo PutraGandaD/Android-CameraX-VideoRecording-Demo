@@ -43,6 +43,7 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.LanczosResample
 import androidx.media3.effect.Presentation
+import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC
 import androidx.media3.transformer.DefaultEncoderFactory
@@ -426,6 +427,11 @@ class MainActivity : AppCompatActivity() {
                     .setRequestedVideoEncoderSettings(
                         VideoEncoderSettings.Builder()
                             .setBitrate(2_500_000) //2.5Mbps bitrate
+                            .build()
+                    )
+                    .setRequestedAudioEncoderSettings(
+                        AudioEncoderSettings.Builder()
+                            .setBitrate(128_000) // 128Kbps audio bitrate
                             .build()
                     )
                     .build()
