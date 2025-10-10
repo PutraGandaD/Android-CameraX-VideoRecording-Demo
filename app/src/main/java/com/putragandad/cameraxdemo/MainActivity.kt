@@ -1,52 +1,63 @@
 package com.putragandad.cameraxdemo
 
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import android.Manifest
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
-import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.ImageCapture
-import androidx.camera.video.Recorder
-import androidx.camera.video.Recording
-import androidx.camera.video.VideoCapture
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
-import com.putragandad.cameraxdemo.databinding.ActivityMainBinding
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.core.Preview
-import androidx.camera.core.CameraSelector
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
+import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraControl
 import androidx.camera.core.CameraInfo
+import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.FocusMeteringAction.FLAG_AF
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.Preview
 import androidx.camera.core.TorchState
-import androidx.camera.video.FallbackStrategy
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
+import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
+import androidx.media3.common.Effect
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC
+import androidx.media3.transformer.DefaultEncoderFactory
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
+import androidx.media3.transformer.Effects
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.InAppMp4Muxer
+import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.VideoEncoderSettings
+import com.google.common.collect.ImmutableList
+import com.putragandad.cameraxdemo.databinding.ActivityMainBinding
 import java.io.File
-import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 typealias LumaListener = (luma: Double) -> Unit
@@ -171,25 +182,13 @@ class MainActivity : AppCompatActivity() {
                                 val msg = "Video capture succeeded: " +
                                         "${recordEvent.outputResults.outputUri}"
 
-                                // notify mediastore so this video can be indexed on google photo/gallery
-                                // for android >= 10
-                                contentValues.put(MediaStore.Video.Media.IS_PENDING, false)
-                                this.contentResolver.update(recordEvent.outputResults.outputUri, contentValues, null, null)
-
-                                Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT)
-                                    .show()
-                                Log.d(TAG, msg)
+                                compressVideo(recordEvent.outputResults.outputUri)
                             } else {
                                 recording?.close()
                                 recording = null
                                 Log.e(TAG, "Video capture ends with error: " +
                                         "${recordEvent.error}")
                             }
-                            viewBinding.videoCaptureButton.apply {
-                                isEnabled = true
-                            }.setImageResource(R.drawable.ic_baseline_videocam_24)
-
-                            viewBinding.switchCamera.visibility = View.VISIBLE
                         }
                     }
                 }
@@ -245,11 +244,6 @@ class MainActivity : AppCompatActivity() {
                                 Log.e(TAG, "Video capture ends with error: " +
                                         "${recordEvent.error}")
                             }
-                            viewBinding.videoCaptureButton.apply {
-                                isEnabled = true
-                            }.setImageResource(R.drawable.ic_baseline_videocam_24)
-
-                            viewBinding.switchCamera.visibility = View.VISIBLE
                         }
                     }
                 }
@@ -374,6 +368,64 @@ class MainActivity : AppCompatActivity() {
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(
             baseContext, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun compressVideo(uri: Uri) {
+        val transformerListener: Transformer.Listener =
+            object : Transformer.Listener {
+                override fun onCompleted(composition: Composition, result: ExportResult) {
+                    viewBinding.videoCaptureButton.apply {
+                        isEnabled = true
+                    }.setImageResource(R.drawable.ic_baseline_videocam_24)
+
+                    viewBinding.switchCamera.visibility = View.VISIBLE
+                }
+
+                override fun onError(composition: Composition, result: ExportResult,
+                                     exception: ExportException
+                ) {
+
+                }
+            }
+
+
+        val videoFileFolder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES).toString() + "/CameraX_Video")
+        if (!videoFileFolder.exists()) {
+            videoFileFolder.mkdirs()
+        }
+        val mVideoFileName = "compressed.mp4"
+        val videoFile = File(videoFileFolder, mVideoFileName)
+
+        val videoEncoderSettings = VideoEncoderSettings.DEFAULT
+
+        val inputMediaItem = MediaItem.fromUri(uri)
+        val transformer = Transformer.Builder(this)
+            .setVideoMimeType(MimeTypes.VIDEO_H264)
+            .setAudioMimeType(MimeTypes.AUDIO_AMR_NB)
+            .addListener(transformerListener)
+            .setEncoderFactory(
+                DefaultEncoderFactory.Builder(this.getApplicationContext())
+                    .setRequestedVideoEncoderSettings(videoEncoderSettings)
+                    .build()
+            )
+            .setMuxerFactory(InAppMp4Muxer.Factory())
+            .experimentalSetTrimOptimizationEnabled(true)
+            .build()
+        transformer.start(createComposition(inputMediaItem), videoFile.absolutePath)
+    }
+
+    @UnstableApi
+    private fun createComposition(mediaItem: MediaItem): Composition {
+        val editedMediaItemBuilder = EditedMediaItem.Builder(mediaItem)
+        // For image inputs. Automatically ignored if input is audio/video.
+        editedMediaItemBuilder.setFrameRate(30)
+        val editedMediaItemSequenceBuilder =
+            EditedMediaItemSequence.Builder(editedMediaItemBuilder.build())
+        val compositionBuilder =
+            Composition.Builder(editedMediaItemSequenceBuilder.build())
+                .setHdrMode(HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC)
+        return compositionBuilder.build()
     }
 
     private val activityResultLauncher =
