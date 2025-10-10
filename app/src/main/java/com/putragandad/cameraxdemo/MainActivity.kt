@@ -35,11 +35,14 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
+import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.LanczosResample
+import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC
 import androidx.media3.transformer.DefaultEncoderFactory
@@ -182,7 +185,15 @@ class MainActivity : AppCompatActivity() {
                                 val msg = "Video capture succeeded: " +
                                         "${recordEvent.outputResults.outputUri}"
 
+                                // notify mediastore so this video can be indexed on google photo/gallery
+                                // for android >= 10
+                                contentValues.put(MediaStore.Video.Media.IS_PENDING, false)
+                                this.contentResolver.update(recordEvent.outputResults.outputUri, contentValues, null, null)
+
                                 compressVideo(recordEvent.outputResults.outputUri)
+
+                                viewBinding.progressBar.visibility = View.VISIBLE
+                                viewBinding.videoCaptureButton.isEnabled = false
                             } else {
                                 recording?.close()
                                 recording = null
@@ -226,6 +237,8 @@ class MainActivity : AppCompatActivity() {
                             if (!recordEvent.hasError()) {
                                 val msg = "Video capture succeeded: " +
                                         "${recordEvent.outputResults.outputUri}"
+
+                                compressVideo(recordEvent.outputResults.outputUri)
 
                                 // notify mediastore so this video can be indexed on google photo/gallery
                                 // for android < 10
@@ -372,6 +385,13 @@ class MainActivity : AppCompatActivity() {
 
     @OptIn(UnstableApi::class)
     private fun compressVideo(uri: Uri) {
+        val videoFileFolder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES).toString() + "/CameraX_Video")
+        if (!videoFileFolder.exists()) {
+            videoFileFolder.mkdirs()
+        }
+        val mVideoFileName = "compressed_video.mp4"
+        val videoFile = File(videoFileFolder, mVideoFileName)
+
         val transformerListener: Transformer.Listener =
             object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, result: ExportResult) {
@@ -380,6 +400,10 @@ class MainActivity : AppCompatActivity() {
                     }.setImageResource(R.drawable.ic_baseline_videocam_24)
 
                     viewBinding.switchCamera.visibility = View.VISIBLE
+                    viewBinding.progressBar.visibility = View.GONE
+                    viewBinding.videoCaptureButton.isEnabled = true
+
+                    Toast.makeText(baseContext, "Video captured and compressed successfully", Toast.LENGTH_LONG).show()
                 }
 
                 override fun onError(composition: Composition, result: ExportResult,
@@ -389,20 +413,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-
-        val videoFileFolder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES).toString() + "/CameraX_Video")
-        if (!videoFileFolder.exists()) {
-            videoFileFolder.mkdirs()
-        }
-        val mVideoFileName = "compressed.mp4"
-        val videoFile = File(videoFileFolder, mVideoFileName)
-
         val videoEncoderSettings = VideoEncoderSettings.DEFAULT
 
         val inputMediaItem = MediaItem.fromUri(uri)
         val transformer = Transformer.Builder(this)
-            .setVideoMimeType(MimeTypes.VIDEO_H264)
-            .setAudioMimeType(MimeTypes.AUDIO_AMR_NB)
+            .setVideoMimeType(MimeTypes.VIDEO_H264) // compression of AVC
+            .setAudioMimeType(MimeTypes.AUDIO_AAC) // best audio
             .addListener(transformerListener)
             .setEncoderFactory(
                 DefaultEncoderFactory.Builder(this.getApplicationContext())
@@ -418,14 +434,28 @@ class MainActivity : AppCompatActivity() {
     @UnstableApi
     private fun createComposition(mediaItem: MediaItem): Composition {
         val editedMediaItemBuilder = EditedMediaItem.Builder(mediaItem)
-        // For image inputs. Automatically ignored if input is audio/video.
-        editedMediaItemBuilder.setFrameRate(30)
+            .setFrameRate(30)
+            .setEffects(Effects(emptyList(), createVideoEffectsFromBundle()))
+
         val editedMediaItemSequenceBuilder =
             EditedMediaItemSequence.Builder(editedMediaItemBuilder.build())
         val compositionBuilder =
             Composition.Builder(editedMediaItemSequenceBuilder.build())
                 .setHdrMode(HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC)
         return compositionBuilder.build()
+    }
+
+    @UnstableApi
+    private fun createVideoEffectsFromBundle(): MutableList<Effect> {
+        val effects = mutableListOf<Effect>()
+
+        val resolutionHeight = 480 // force 480p
+        if (resolutionHeight != C.LENGTH_UNSET) {
+            effects.add(LanczosResample.scaleToFitWithFlexibleOrientation(10000, resolutionHeight))
+            effects.add(Presentation.createForShortSide(resolutionHeight))
+        }
+
+        return effects
     }
 
     private val activityResultLauncher =
