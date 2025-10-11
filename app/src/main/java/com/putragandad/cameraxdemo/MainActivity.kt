@@ -40,18 +40,22 @@ import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.LanczosResample
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC
+import androidx.media3.transformer.DefaultAssetLoaderFactory
+import androidx.media3.transformer.DefaultDecoderFactory
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.InAppFragmentedMp4Muxer
 import androidx.media3.transformer.InAppMp4Muxer
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
@@ -186,12 +190,12 @@ class MainActivity : AppCompatActivity() {
                                 val msg = "Video capture succeeded: " +
                                         "${recordEvent.outputResults.outputUri}"
 
+                                compressVideo(recordEvent.outputResults.outputUri)
+
                                 // notify mediastore so this video can be indexed on google photo/gallery
                                 // for android >= 10
                                 contentValues.put(MediaStore.Video.Media.IS_PENDING, false)
                                 this.contentResolver.update(recordEvent.outputResults.outputUri, contentValues, null, null)
-
-                                compressVideo(recordEvent.outputResults.outputUri)
 
                                 viewBinding.progressBar.visibility = View.VISIBLE
                                 viewBinding.videoCaptureButton.isEnabled = false
@@ -243,11 +247,11 @@ class MainActivity : AppCompatActivity() {
 
                                 // notify mediastore so this video can be indexed on google photo/gallery
                                 // for android < 10
-                                contentValues.put(MediaStore.Video.Media.DATA, videoFile.absolutePath)
-                                this.contentResolver.insert(
-                                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                                    contentValues
-                                )
+//                                contentValues.put(MediaStore.Video.Media.DATA, videoFile.absolutePath)
+//                                this.contentResolver.insert(
+//                                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+//                                    contentValues
+//                                )
 
                                 Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT)
                                     .show()
@@ -410,20 +414,37 @@ class MainActivity : AppCompatActivity() {
                 override fun onError(composition: Composition, result: ExportResult,
                                      exception: ExportException
                 ) {
+                    viewBinding.videoCaptureButton.apply {
+                        isEnabled = true
+                    }.setImageResource(R.drawable.ic_baseline_videocam_24)
 
+                    viewBinding.switchCamera.visibility = View.VISIBLE
+                    viewBinding.progressBar.visibility = View.GONE
+                    viewBinding.videoCaptureButton.isEnabled = true
+
+                    Toast.makeText(baseContext, "Video captured and compressed error", Toast.LENGTH_LONG).show()
                 }
             }
 
         val videoEncoderSettings = VideoEncoderSettings.DEFAULT
 
+        val assetLoaderFactory = DefaultAssetLoaderFactory(
+            this,
+            DefaultDecoderFactory.Builder(this.applicationContext)
+                .setEnableDecoderFallback(true)
+                .build(),
+            Clock.DEFAULT,
+            /* logSessionId= */ null
+        )
+
         val inputMediaItem = MediaItem.fromUri(uri)
         val transformer = Transformer.Builder(this)
             .setVideoMimeType(MimeTypes.VIDEO_H264) // compression of AVC
-            .setAudioMimeType(MimeTypes.AUDIO_AAC) // best audio
+            .setAudioMimeType(MimeTypes.AUDIO_AAC)
             .addListener(transformerListener)
             .setEncoderFactory(
-                DefaultEncoderFactory.Builder(this.getApplicationContext())
-//                    .setRequestedVideoEncoderSettings(videoEncoderSettings)
+                DefaultEncoderFactory.Builder(this.applicationContext)
+                    .setRequestedVideoEncoderSettings(videoEncoderSettings)
                     .setRequestedVideoEncoderSettings(
                         VideoEncoderSettings.Builder()
                             .setBitrate(2_500_000) //2.5Mbps bitrate
@@ -436,7 +457,8 @@ class MainActivity : AppCompatActivity() {
                     )
                     .build()
             )
-            .setMuxerFactory(InAppMp4Muxer.Factory())
+//            .setMuxerFactory(InAppFragmentedMp4Muxer.Factory())
+            .setAssetLoaderFactory(assetLoaderFactory)
             .experimentalSetTrimOptimizationEnabled(true)
             .build()
         transformer.start(createComposition(inputMediaItem), videoFile.absolutePath)
