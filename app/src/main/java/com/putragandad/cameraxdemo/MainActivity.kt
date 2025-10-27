@@ -1,6 +1,7 @@
 package com.putragandad.cameraxdemo
 
 import android.Manifest
+import android.app.ProgressDialog
 import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -8,6 +9,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import android.view.MotionEvent
@@ -56,6 +59,7 @@ import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
 import com.putragandad.cameraxdemo.databinding.ActivityMainBinding
@@ -497,7 +501,36 @@ class MainActivity : AppCompatActivity() {
             .setAssetLoaderFactory(assetLoaderFactory)
             .experimentalSetTrimOptimizationEnabled(true)
             .build()
-        transformer.start(createComposition(inputMediaItem), videoFile.absolutePath)
+
+        val progressDialog = ProgressDialog(this).apply {
+            setTitle("Processing Video")
+            setMessage("Please wait while your media is being transformed...")
+            setCancelable(false)
+            setProgressStyle(ProgressDialog.STYLE_HORIZONTAL)
+            max = 100
+            progress = 0
+            show()
+        }
+
+        val progressHolder = ProgressHolder()
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        transformer.start(createComposition(inputMediaItem), videoFile.absolutePath) // start transformation
+
+        mainHandler.post(object : Runnable {
+            override fun run() {
+                val progressState: @Transformer.ProgressState Int = transformer.getProgress(progressHolder)
+
+                progressDialog.progress = progressHolder.progress
+                progressDialog.setMessage("Transforming... ${progressHolder.progress}%")
+
+                if(progressState != Transformer.PROGRESS_STATE_NOT_STARTED) {
+                    mainHandler.postDelayed(this, 500)
+                } else {
+                    progressDialog.dismiss()
+                }
+            }
+        })
     }
 
     @UnstableApi
