@@ -6,14 +6,17 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraControl
@@ -39,14 +42,12 @@ import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
-import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.LanczosResample
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
-import androidx.media3.transformer.Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC
 import androidx.media3.transformer.DefaultAssetLoaderFactory
 import androidx.media3.transformer.DefaultDecoderFactory
 import androidx.media3.transformer.DefaultEncoderFactory
@@ -55,11 +56,8 @@ import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
-import androidx.media3.transformer.InAppFragmentedMp4Muxer
-import androidx.media3.transformer.InAppMp4Muxer
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
-import com.google.common.collect.ImmutableList
 import com.putragandad.cameraxdemo.databinding.ActivityMainBinding
 import java.io.File
 import java.text.SimpleDateFormat
@@ -76,7 +74,8 @@ class MainActivity : AppCompatActivity() {
     private var imageCapture: ImageCapture? = null
 
     private var videoCapture: VideoCapture<Recorder>? = null
-    private var recording: Recording? = null
+    private var activeRecording: Recording? = null
+    private var countDownTimer: CountDownTimer? = null
 
     private lateinit var cameraExecutor: ExecutorService
 
@@ -84,6 +83,8 @@ class MainActivity : AppCompatActivity() {
 
     private var cameraInfo: CameraInfo? = null
     private var lensFacing: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA // default back camerax
+
+    private val viewModel : MainViewModel by viewModels()
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -138,11 +139,11 @@ class MainActivity : AppCompatActivity() {
 
         viewBinding.videoCaptureButton.isEnabled = false
 
-        val curRecording = recording
+        val curRecording = activeRecording
         if (curRecording != null) {
             // Stop the current recording session.
             curRecording.stop()
-            recording = null
+            activeRecording = null
             return
         }
 
@@ -166,7 +167,7 @@ class MainActivity : AppCompatActivity() {
             contentValues.put(MediaStore.Video.Media.DATE_TAKEN, timestamp)
             contentValues.put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/CameraX-Video")
 
-            recording = videoCapture.output
+            activeRecording = videoCapture.output
                 .prepareRecording(this, mediaStoreOutputOptions)
                 .apply {
                     if (PermissionChecker.checkSelfPermission(this@MainActivity,
@@ -184,6 +185,8 @@ class MainActivity : AppCompatActivity() {
                             }.setImageResource(R.drawable.ic_outline_stop_circle_24)
 
                             viewBinding.switchCamera.visibility = View.GONE
+
+                            startTimer(viewBinding.tvCountdown)
                         }
                         is VideoRecordEvent.Finalize -> {
                             if (!recordEvent.hasError()) {
@@ -200,11 +203,13 @@ class MainActivity : AppCompatActivity() {
                                 viewBinding.progressBar.visibility = View.VISIBLE
                                 viewBinding.videoCaptureButton.isEnabled = false
                             } else {
-                                recording?.close()
-                                recording = null
+                                activeRecording?.close()
+                                activeRecording = null
                                 Log.e(TAG, "Video capture ends with error: " +
                                         "${recordEvent.error}")
                             }
+
+                            stopTimer()
                         }
                     }
                 }
@@ -219,7 +224,7 @@ class MainActivity : AppCompatActivity() {
 
             val fileOutputOptions = FileOutputOptions.Builder(videoFile).build()
 
-            recording = videoCapture.output
+            activeRecording = videoCapture.output
                 .prepareRecording(this, fileOutputOptions) // use the overload constructor for API 21 found in Recorder.java of Camerax video
                 .apply {
                     if (PermissionChecker.checkSelfPermission(this@MainActivity,
@@ -237,6 +242,8 @@ class MainActivity : AppCompatActivity() {
                             }.setImageResource(R.drawable.ic_outline_stop_circle_24)
 
                             viewBinding.switchCamera.visibility = View.GONE
+
+                            startTimer(viewBinding.tvCountdown)
                         }
                         is VideoRecordEvent.Finalize -> {
                             if (!recordEvent.hasError()) {
@@ -257,11 +264,13 @@ class MainActivity : AppCompatActivity() {
                                     .show()
                                 Log.d(TAG, msg)
                             } else {
-                                recording?.close()
-                                recording = null
+                                activeRecording?.close()
+                                activeRecording = null
                                 Log.e(TAG, "Video capture ends with error: " +
                                         "${recordEvent.error}")
                             }
+
+                            stopTimer()
                         }
                     }
                 }
@@ -377,6 +386,33 @@ class MainActivity : AppCompatActivity() {
                 focusIndicator.alpha = 1f
             }
             .start()
+    }
+
+    private fun startTimer(timerTextView: TextView) {
+        countDownTimer = object : CountDownTimer(60_000, 1_000) {
+            override fun onTick(millisUntilFinished: Long) {
+                val seconds = millisUntilFinished / 1000
+                val minutes = seconds / 60
+                val remainingSeconds = seconds % 60
+                timerTextView.text = String.format("%02d:%02d", minutes, remainingSeconds)
+            }
+
+            override fun onFinish() {
+                stopRecording()
+                timerTextView.text = "00:00"
+            }
+        }.start()
+    }
+
+    private fun stopRecording() {
+        activeRecording?.stop()
+        activeRecording = null
+        stopTimer()
+    }
+
+    private fun stopTimer() {
+        countDownTimer?.cancel()
+        countDownTimer = null
     }
 
     private fun requestPermissions() {
